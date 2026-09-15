@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -319,6 +319,11 @@ export default function PlayerPerformance() {
   const [jobError, setJobError] = useState("");
   const navigate = useNavigate();
 
+  // --- Bulk Excel upload state ---
+  const [excelUploadStatus, setExcelUploadStatus] = useState("");
+  const [excelUploadErrors, setExcelUploadErrors] = useState<any[]>([]);
+  const excelInputRef = useRef<HTMLInputElement>(null);
+
   const uploadVideo = async (file: File) => {
     const formData = new FormData();
     formData.append("file", file);
@@ -387,8 +392,52 @@ export default function PlayerPerformance() {
     }
   };
 
+  // --- Bulk Excel upload handler ---
+  const handleExcelUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-  useEffect(() => {
+    setExcelUploadStatus("Uploading...");
+    setExcelUploadErrors([]);
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const res = await fetch("http://localhost:8000/api/players/upload-excel", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        const detail = data.detail;
+        if (detail && detail.errors) {
+          setExcelUploadStatus(
+            detail.message || "Some rows had errors — no players were imported",
+          );
+          setExcelUploadErrors(detail.errors);
+        } else {
+          setExcelUploadStatus(
+            (typeof detail === "string" ? detail : detail?.message) ||
+              "Upload failed",
+          );
+        }
+        return;
+      }
+
+      setExcelUploadStatus(`${data.players_imported} player(s) imported successfully`);
+      fetchPlayers();
+    } catch (err) {
+      console.error("Excel upload failed:", err);
+      setExcelUploadStatus("Upload failed — please try again");
+    } finally {
+      if (excelInputRef.current) excelInputRef.current.value = "";
+    }
+  };
+
+  const fetchPlayers = () => {
     fetch("http://localhost:8000/api/players")
       .then((res) => res.json())
       .then((data) => {
@@ -399,6 +448,10 @@ export default function PlayerPerformance() {
         console.error("API ERROR:", err);
         setPlayers(generatePlayerData());
       });
+  };
+
+  useEffect(() => {
+    fetchPlayers();
   }, []);
 
   useEffect(() => {
@@ -768,20 +821,65 @@ export default function PlayerPerformance() {
               )}
             </div>
 
-            {canManagePlayers() && (
-            <Button
-              type="button"
-              size="sm"
-                onClick={() => {
-                  console.log("navigating to add-player");
-                  navigate("/add-player");
-                }}
-              className="bg-green-600 hover:bg-green-700 text-white shrink-0"
-            >
-              Add Player
-            </Button>
-            )}
+            <div className="flex items-center gap-2 shrink-0">
+              {canManagePlayers() && (
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => {
+                    console.log("navigating to add-player");
+                    navigate("/add-player");
+                  }}
+                  className="bg-green-600 hover:bg-green-700 text-white"
+                >
+                  Add Player
+                </Button>
+              )}
+
+              {canManagePlayers() && (
+                <>
+                  <input
+                    type="file"
+                    accept=".xlsx"
+                    ref={excelInputRef}
+                    onChange={handleExcelUpload}
+                    className="hidden"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => excelInputRef.current?.click()}
+                  >
+                    Bulk Upload
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
+
+          {canManagePlayers() && excelUploadStatus && (
+            <div className="bg-white rounded-lg border p-3 text-sm">
+              <p
+                className={
+                  excelUploadErrors.length > 0
+                    ? "text-red-600"
+                    : "text-green-600"
+                }
+              >
+                {excelUploadStatus}
+              </p>
+              {excelUploadErrors.length > 0 && (
+                <ul className="mt-2 space-y-1 text-xs text-gray-600 list-disc list-inside">
+                  {excelUploadErrors.map((err: any, i: number) => (
+                    <li key={i}>
+                      Row {err.row}: {err.errors.join(", ")}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
 
           {/* Quick Stats Overview */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
